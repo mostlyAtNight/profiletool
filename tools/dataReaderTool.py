@@ -32,13 +32,19 @@ from qgis.core import *
 import platform
 from math import sqrt
 
+has_np = True
+try:
+	import numpy as np
+except:
+	has_np = False
+
 
 class DataReaderTool:
 
 	"""def __init__(self):
 		self.profiles = None"""
 
-	def dataReaderTool(self, iface1,tool1, profile1, pointstoDraw1, fullresolution1):
+	def dataReaderTool(self, iface1,tool1, profile1, pointstoDraw1, fullresolution1, library):
 		"""
 		Return a dictionnary : {"layer" : layer read,
 								"band" : band read,
@@ -58,6 +64,11 @@ class DataReaderTool:
 		l = []
 		z = []
 		lbefore = 0
+        
+		noDataValue = 0
+		if library == "Matplotlib" and has_np:
+			noDataValue = np.nan
+            
 		for i in range(0,len(self.pointstoDraw)-2):  # work for each segment of polyline
 
 			# for each polylines, set points x,y with map crs (%D) and layer crs (%C)
@@ -118,24 +129,31 @@ class DataReaderTool:
 				xC = x1C + dxC * n
 				yC = y1C + dyC * n
 				attr = 0
-				if layer.type() == layer.PluginLayer and layer.LAYER_TYPE == 'crayfish_viewer':
+				if layer.type() == layer.RasterLayer and QGis.QGIS_VERSION_INT >= 10900: # for QGIS >= 1.9
+					# this code adapted from valuetool plugin
+					ident = layer.dataProvider().identify(QgsPoint(xC,yC), QgsRaster.IdentifyFormatValue )
+					#if ident is not None and ident.has_key(choosenBand+1):
+					if ident is not None and (choosenBand+1 in ident.results()):
+						#attr = ident[choosenBand+1].toDouble()[0]
+						attr = ident.results()[choosenBand+1]
+						if  (layer.dataProvider().srcHasNoDataValue(choosenBand+1) and \
+							layer.dataProvider().srcNoDataValue(choosenBand+1) == attr) or \
+							attr is None:
+							attr = noDataValue
+					else:
+						attr = noDataValue
+				else:
 					ident = layer.identify(QgsPoint(xC,yC))
 					try:
 						attr = float(ident[1].values()[choosenBand])
 					except:
 						pass
-				else: #RASTER LAYERS
-					# this code adapted from valuetool plugin
-					ident = layer.dataProvider().identify(QgsPoint(xC,yC), QgsRaster.IdentifyFormatValue )
-					#if ident is not None and ident.has_key(choosenBand+1):
-					if ident is not None and (choosenBand+1 in ident.results()):
-						attr = ident.results()[choosenBand+1]
-						#if attr is None:
-						#	attr=float("nan")
-						#print(attr)
-						#if layer.dataProvider().isNoDataValue ( choosenBand+1, attr ):
-							#attr = 0
-				#print "Null cell value catched as zero!"  # For none values, profile height = 0. It's not elegant...
+					if layer.type() == layer.PluginLayer and layer.LAYER_TYPE == 'crayfish_viewer':
+						if attr == 0.0:
+							attr = noDataValue
+					else:
+						if attr == layer.noDataValue():
+							attr = noDataValue
 
 				z += [attr]
 				temp = n
